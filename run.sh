@@ -9,7 +9,7 @@ function createPostgresConfig() {
 }
 
 function setPostgresPassword() {
-    sudo -u postgres psql -c "ALTER USER renderer PASSWORD '${PGPASSWORD:-renderer}'"
+    sudo -u postgres psql -c "ALTER USER renderaccount PASSWORD '${PGPASSWORD:-renderaccount}'"
 }
 
 if [ "$#" -ne 1 ]; then
@@ -30,22 +30,25 @@ if [ "$1" = "import" ]; then
         sudo -u postgres /usr/lib/postgresql/12/bin/pg_ctl -D /var/lib/postgresql/12/main/ initdb -o "--locale C.UTF-8"
     fi
 
+    # Ensure that tile directory is in right state
+    chown renderaccount:renderaccount -R /var/lib/mod_tile
+
     # Initialize PostgreSQL
     createPostgresConfig
     service postgresql start
-    sudo -u postgres createuser renderer
-    sudo -u postgres createdb -E UTF8 -O renderer gis
+    sudo -u postgres createuser renderaccount 
+    sudo -u postgres createdb -E UTF8 -O renderaccount gis
     sudo -u postgres psql -d gis -c "CREATE EXTENSION postgis;"
     sudo -u postgres psql -d gis -c "CREATE EXTENSION hstore;"
-    sudo -u postgres psql -d gis -c "ALTER TABLE geometry_columns OWNER TO renderer;"
-    sudo -u postgres psql -d gis -c "ALTER TABLE spatial_ref_sys OWNER TO renderer;"
+    sudo -u postgres psql -d gis -c "ALTER TABLE geometry_columns OWNER TO renderaccount;"
+    sudo -u postgres psql -d gis -c "ALTER TABLE spatial_ref_sys OWNER TO renderaccount;"
     setPostgresPassword
 
-    # Download Luxembourg as sample if no data is provided
+    # Download Great Britain by default if no data is provided
     if [ ! -f /data.osm.pbf ] && [ -z "$DOWNLOAD_PBF" ]; then
         echo "WARNING: No import file at /data.osm.pbf, so importing Luxembourg as example..."
-        DOWNLOAD_PBF="https://download.geofabrik.de/europe/luxembourg-latest.osm.pbf"
-        DOWNLOAD_POLY="https://download.geofabrik.de/europe/luxembourg.poly"
+        DOWNLOAD_PBF="http://download.geofabrik.de/europe/great-britain-latest.osm.pbf"
+        DOWNLOAD_POLY="http://download.geofabrik.de/europe/great-britain.poly"
     fi
 
     if [ -n "$DOWNLOAD_PBF" ]; then
@@ -64,19 +67,35 @@ if [ "$1" = "import" ]; then
         REPLICATION_TIMESTAMP=$(cat /var/lib/mod_tile/replication_timestamp.txt)
 
         # initial setup of osmosis workspace (for consecutive updates)
-        sudo -u renderer openstreetmap-tiles-update-expire $REPLICATION_TIMESTAMP
+        sudo -u renderaccount openstreetmap-tiles-update-expire $REPLICATION_TIMESTAMP
     fi
 
     # copy polygon file if available
     if [ -f /data.poly ]; then
-        sudo -u renderer cp /data.poly /var/lib/mod_tile/data.poly
+        sudo -u renderaccount cp /data.poly /var/lib/mod_tile/data.poly
     fi
 
+    # Configure stylesheet
+    if [ -z "$STYLESHEET_REPO" ]; then
+        STYLESHEET_REPO="https://github.com/ph1ll/openstreetmap-4x4-tracks-carto.git"
+    fi
+    mkdir -p /home/renderaccount/src
+    cd /home/renderaccount/src
+    git clone $STYLESHEET_REPO openstreetmap-carto --depth 1
+    cd openstreetmap-carto
+    npm install -g carto
+    carto project.mml > mapnik.xml
+
     # Import data
-    sudo -u renderer osm2pgsql -d gis --create --slim -G --hstore --tag-transform-script /home/renderer/src/openstreetmap-carto/openstreetmap-carto.lua --number-processes ${THREADS:-4} -S /home/renderer/src/openstreetmap-carto/openstreetmap-carto.style /data.osm.pbf ${OSM2PGSQL_EXTRA_ARGS}
+    sudo -u renderaccount osm2pgsql -d gis --create --slim -G --hstore --tag-transform-script /home/renderaccount/src/openstreetmap-carto/openstreetmap-carto.lua --number-processes ${THREADS:-4} -S /home/renderaccount/src/openstreetmap-carto/openstreetmap-carto.style /data.osm.pbf ${OSM2PGSQL_EXTRA_ARGS}
 
     # Create indexes
-    sudo -u postgres psql -d gis -f indexes.sql
+    sudo -u postgres psql -d gis -f /home/renderaccount/src/openstreetmap-carto/indexes.sql
+    
+    # Get style external data
+    mkdir -p /home/renderaccount/src/openstreetmap-carto/data
+    chown renderaccount:renderaccount /home/renderaccount/src/openstreetmap-carto/data
+    sudo -u renderaccount /home/renderaccount/src/openstreetmap-carto/scripts/get-external-data.py -c /home/renderaccount/src/openstreetmap-carto/external-data.yml -D /home/renderaccount/src/openstreetmap-carto/data
 
     # Register that data has changed for mod_tile caching purposes
     touch /var/lib/mod_tile/planet-import-complete
@@ -92,6 +111,9 @@ if [ "$1" = "run" ]; then
 
     # Fix postgres data privileges
     chown postgres:postgres /var/lib/postgresql -R
+
+    # Fix tile data privileges
+    chown renderaccount:renderaccount -R /var/lib/mod_tile
 
     # Configure Apache CORS
     if [ "$ALLOW_CORS" == "enabled" ] || [ "$ALLOW_CORS" == "1" ]; then
@@ -118,7 +140,7 @@ if [ "$1" = "run" ]; then
     }
     trap stop_handler SIGTERM
 
-    sudo -u renderer renderd -f -c /usr/local/etc/renderd.conf &
+    sudo -u renderaccount renderd -f -c /usr/local/etc/renderd.conf &
     child=$!
     wait "$child"
 

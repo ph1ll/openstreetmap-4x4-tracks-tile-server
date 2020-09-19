@@ -1,3 +1,7 @@
+# About this fork
+
+This fork uses alternative styling to the default OpenStreetMap style to aid in the identification of 4x4 suitable tracks in the UK.
+
 # openstreetmap-tile-server
 
 [![Build Status](https://travis-ci.org/Overv/openstreetmap-tile-server.svg?branch=master)](https://travis-ci.org/Overv/openstreetmap-tile-server) [![](https://images.microbadger.com/badges/image/overv/openstreetmap-tile-server.svg)](https://microbadger.com/images/overv/openstreetmap-tile-server "openstreetmap-tile-server")
@@ -127,13 +131,13 @@ docker run \
     run
 ```
 
-Use the user `renderer` and the database `gis` to connect.
+Use the user `renderaccount` and the database `gis` to connect.
 
 ```
-psql -h localhost -U renderer gis
+psql -h localhost -U renderaccount gis
 ```
 
-The default password is `renderer`, but it can be changed using the `PGPASSWORD` environment variable:
+The default password is `renderaccount`, but it can be changed using the `PGPASSWORD` environment variable:
 
 ```
 docker run \
@@ -199,7 +203,7 @@ docker run \
     import
 ```
 
->Note that if you use a folder other than `/nodes` then you must make sure that you manually set the owner to `renderer`!
+>Note that if you use a folder other than `/nodes` then you must make sure that you manually set the owner to `renderaccount`!
 
 ### Benchmarks
 
